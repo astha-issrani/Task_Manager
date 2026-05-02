@@ -1,13 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 
 export default function SignupPage() {
-  const { signup } = useAuth();
+  const { signup, user } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: '', email: '', password: '' });
   const [loading, setLoading] = useState(false);
+
+  // Navigate when user state is actually set
+  useEffect(() => {
+    if (user) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [user, navigate]);
 
   const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -18,7 +25,7 @@ export default function SignupPage() {
     try {
       await signup(form.name, form.email, form.password);
       toast.success('Account created! Welcome to TaskFlow 🎉');
-      navigate('/dashboard');
+      // Navigation handled by useEffect above
     } catch (err) {
       toast.error(err.response?.data?.message || 'Signup failed');
     } finally {
