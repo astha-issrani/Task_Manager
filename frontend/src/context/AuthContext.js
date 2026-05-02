@@ -19,15 +19,47 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (token) {
-      // Cache-busting headers to prevent 304 responses on Railway
+    const storedUser = localStorage.getItem('user');
+
+    if (token && storedUser && storedUser !== 'undefined' && storedUser !== 'null') {
+      // We already have user in localStorage — use it immediately
+      // Then try to refresh from server in background
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        setUser(parsedUser);
+      } catch {
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
+        setUser(null);
+      }
+      setLoading(false);
+
+      // Background refresh — don't block on this
       api.get('/auth/me', {
         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
       })
         .then((res) => {
-          const userData = res.data.user;
-          setUser(userData);
-          localStorage.setItem('user', JSON.stringify(userData));
+          if (res.data?.user) {
+            setUser(res.data.user);
+            localStorage.setItem('user', JSON.stringify(res.data.user));
+          }
+        })
+        .catch(() => {
+          // Token expired or invalid — log out
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+        });
+    } else if (token) {
+      // Have token but no stored user — fetch from server
+      api.get('/auth/me', {
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+      })
+        .then((res) => {
+          if (res.data?.user) {
+            setUser(res.data.user);
+            localStorage.setItem('user', JSON.stringify(res.data.user));
+          }
         })
         .catch(() => {
           localStorage.removeItem('token');
