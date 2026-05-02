@@ -15,9 +15,10 @@
     "recharts": "^2.7.2"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build"
-  },
+  "start": "react-scripts start",
+  "build": "react-scripts build",
+  "serve": "npx serve -s build"
+},
   "browserslist": {
     "production": [
       ">0.2%",
