@@ -60,6 +60,58 @@ router.get('/available', auth, async (req, res) => {
   }
 });
 
+// GET /api/projects/preview/:id — view project details before joining (any logged-in user)
+router.get('/preview/:id', auth, async (req, res) => {
+  try {
+    const project = await populateProject(Project.findById(req.params.id));
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+
+    const [total, done, inProgress] = await Promise.all([
+      Task.countDocuments({ project: project._id }),
+      Task.countDocuments({ project: project._id, status: 'Done' }),
+      Task.countDocuments({ project: project._id, status: 'In Progress' })
+    ]);
+
+    const isMember = !!getMemberRole(project, req.user._id);
+
+    res.json({
+      project,
+      isMember,
+      userRole: getMemberRole(project, req.user._id),
+      taskStats: { total, done, inProgress }
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// POST /api/projects — create project
+router.post(
+  '/',
+  auth,
+  [body('name').trim().isLength({ min: 3 }).withMessage('Project name must be at least 3 characters')],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
+
+    try {
+      const { name, description, color } = req.body;
+      const project = await Project.create({
+        name,
+        description: description || '',
+        color: color || '#6366f1',
+        createdBy: req.user._id,
+        members: [{ user: req.user._id, role: 'Admin' }]
+      });
+      await project.populate('members.user', 'name email avatar');
+      await project.populate('createdBy', 'name email');
+      res.status(201).json({ message: 'Project created', project });
+    } catch (err) {
+      res.status(500).json({ message: 'Server error', error: err.message });
+    }
+  }
+);
+
 // POST /api/projects/join — join via invite code
 router.post('/join', auth, async (req, res) => {
   try {
@@ -89,37 +141,7 @@ router.post('/join', auth, async (req, res) => {
   }
 });
 
-// POST /api/projects — create project
-router.post(
-  '/',
-  auth,
-  [body('name').trim().isLength({ min: 3 }).withMessage('Project name must be at least 3 characters')],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ message: errors.array()[0].msg });
-
-    try {
-      const { name, description, color } = req.body;
-
-      const project = await Project.create({
-        name,
-        description: description || '',
-        color: color || '#6366f1',
-        createdBy: req.user._id,
-        members: [{ user: req.user._id, role: 'Admin' }]
-      });
-
-      await project.populate('members.user', 'name email avatar');
-      await project.populate('createdBy', 'name email');
-
-      res.status(201).json({ message: 'Project created', project });
-    } catch (err) {
-      res.status(500).json({ message: 'Server error', error: err.message });
-    }
-  }
-);
-
-// POST /api/projects/:id/join-direct — one-click join from available list
+// POST /api/projects/:id/join-direct — one-click join
 router.post('/:id/join-direct', auth, async (req, res) => {
   try {
     const project = await populateProject(Project.findById(req.params.id));
@@ -148,16 +170,20 @@ router.post('/:id/join-direct', auth, async (req, res) => {
   }
 });
 
-// GET /api/projects/:id — get single project
+// GET /api/projects/:id — get single project (members + admins only)
 router.get('/:id', auth, async (req, res) => {
   try {
     const project = await populateProject(Project.findById(req.params.id));
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
     const role = getMemberRole(project, req.user._id);
-    if (!role) return res.status(403).json({ message: 'Access denied' });
 
-    res.json({ project, userRole: role });
+    // Allow global admins even if not a project member
+    if (!role && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    res.json({ project, userRole: role || 'Admin' });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
@@ -179,7 +205,6 @@ router.put('/:id', auth, async (req, res) => {
 
     await project.save();
     await project.populate('members.user', 'name email avatar');
-
     res.json({ message: 'Project updated', project });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -197,7 +222,6 @@ router.delete('/:id', auth, async (req, res) => {
 
     await Task.deleteMany({ project: req.params.id });
     await project.deleteOne();
-
     res.json({ message: 'Project and all tasks deleted' });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -227,7 +251,6 @@ router.post('/:id/members', auth, async (req, res) => {
     project.members.push({ user: userToAdd._id, role: 'Member' });
     await project.save();
     await project.populate('members.user', 'name email avatar');
-
     res.json({ message: 'Member added', project });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -252,7 +275,6 @@ router.delete('/:id/members/:userId', auth, async (req, res) => {
     );
     await project.save();
     await project.populate('members.user', 'name email avatar');
-
     res.json({ message: 'Member removed', project });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -274,7 +296,7 @@ router.post('/:id/leave', auth, async (req, res) => {
       );
       if (otherAdmins.length === 0) {
         return res.status(400).json({
-          message: 'You are the only Admin. Transfer ownership or delete the project before leaving.'
+          message: 'You are the only Admin. Delete the project or assign another Admin before leaving.'
         });
       }
     }
@@ -283,14 +305,13 @@ router.post('/:id/leave', auth, async (req, res) => {
       (m) => m.user.toString() !== req.user._id.toString()
     );
     await project.save();
-
     res.json({ message: 'You have left the project' });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
-// GET /api/projects/:id/invite-code — get invite code (Admin only)
+// GET /api/projects/:id/invite-code (Admin only)
 router.get('/:id/invite-code', auth, async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
@@ -305,7 +326,7 @@ router.get('/:id/invite-code', auth, async (req, res) => {
   }
 });
 
-// POST /api/projects/:id/invite-code/regenerate — regenerate invite code
+// POST /api/projects/:id/invite-code/regenerate (Admin only)
 router.post('/:id/invite-code/regenerate', auth, async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
@@ -316,7 +337,6 @@ router.post('/:id/invite-code/regenerate', auth, async (req, res) => {
 
     project.regenerateInviteCode();
     await project.save();
-
     res.json({ message: 'Invite code regenerated', inviteCode: project.inviteCode });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });

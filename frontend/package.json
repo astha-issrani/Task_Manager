@@ -15,10 +15,10 @@
     "recharts": "^2.7.2"
   },
   "scripts": {
-  "start": "react-scripts start",
-  "build": "react-scripts build",
-  "serve": "npx serve -s build"
-},
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "serve": "npx serve -s build"
+  },
   "browserslist": {
     "production": [
       ">0.2%",
@@ -30,6 +30,5 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  },
-  "proxy": "http://localhost:5000"
+  }
 }
