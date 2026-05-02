@@ -5,25 +5,29 @@ const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(() => {
-  try {
-    const stored = localStorage.getItem('user');
-    if (!stored || stored === 'undefined' || stored === 'null') return null;
-    return JSON.parse(stored);
-  } catch {
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
-    return null;
-  }
-});
+    try {
+      const stored = localStorage.getItem('user');
+      if (!stored || stored === 'undefined' || stored === 'null') return null;
+      return JSON.parse(stored);
+    } catch {
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
-      api.get('/auth/me')
+      // Cache-busting headers to prevent 304 responses on Railway
+      api.get('/auth/me', {
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+      })
         .then((res) => {
-          setUser(res.data.user);
-          localStorage.setItem('user', JSON.stringify(res.data.user));
+          const userData = res.data.user;
+          setUser(userData);
+          localStorage.setItem('user', JSON.stringify(userData));
         })
         .catch(() => {
           localStorage.removeItem('token');
@@ -38,17 +42,19 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const res = await api.post('/auth/login', { email, password });
-    localStorage.setItem('token', res.data.token);
-    localStorage.setItem('user', JSON.stringify(res.data.user));
-    setUser(res.data.user);
+    const { token, user: userData } = res.data;
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    setUser(userData);
     return res.data;
   };
 
   const signup = async (name, email, password) => {
     const res = await api.post('/auth/signup', { name, email, password });
-    localStorage.setItem('token', res.data.token);
-    localStorage.setItem('user', JSON.stringify(res.data.user));
-    setUser(res.data.user);
+    const { token, user: userData } = res.data;
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    setUser(userData);
     return res.data;
   };
 
@@ -58,9 +64,7 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  // Derive global app-level role from user object if your backend stores it
-  // For project-level roles, ProjectDetailPage manages its own userRole state via API
-  const isGlobalAdmin = user?.role === 'admin'; // optional: if your backend has a global role field
+  const isGlobalAdmin = user?.role === 'admin';
 
   return (
     <AuthContext.Provider value={{ user, loading, login, signup, logout, isGlobalAdmin }}>
